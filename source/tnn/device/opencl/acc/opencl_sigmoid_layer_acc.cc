@@ -31,10 +31,14 @@ Status OpenCLSigmoidLayerAcc::Init(Context *context, LayerParam *param, LayerRes
 
 std::set<std::string> OpenCLSigmoidLayerAcc::CreateBuildOptions() {
     std::set<std::string> build_options;
-    std::string compute = "(FLOAT)(1.0f)/(1.0f+exp(-in))";
+    std::string compute = "(FLOAT)(1.0f)/((FLOAT)(1.0f)+exp(-in))";
+    // std::string compute = "(FLOAT)(1.0f)/((FLOAT)(1.0f)+convert_half4(exp(convert_float4(-in))))";
+    // std::string compute = "exp(-in)";
     build_options.emplace(" -DOPERATOR=" + compute);
 
+    LOGE("dlmeng: 1658 change sigmoid layer\n");
     AdjustBuildOptionForFp32(build_options);
+    // build_options.emplace("-DFORCE_FP32");
     return build_options;
 }
 

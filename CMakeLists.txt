@@ -99,13 +99,13 @@ if(TNN_UNIT_TEST_ENABLE)
     set(TNN_SYMBOL_HIDE OFF)
 endif()
 
+add_definitions(-DFORWARD_CALLBACK_ENABLE)
 if(TNN_QUANTIZATION_ENABLE OR TNN_MODEL_CHECK_ENABLE)
     set(TNN_SYMBOL_HIDE OFF)
     add_definitions(-DFORWARD_CALLBACK_ENABLE)
 endif()
 
 if(TNN_MODEL_CHECK_ENABLE)
-    add_definitions(-DOPENCL_FORCE_FP32)
     option(TNN_METAL_FLOAT32 "Enable Metal Float32" ON)
 endif()
 

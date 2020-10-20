@@ -47,6 +47,7 @@ Status OpenCLSoftmaxLayerAcc::Init(Context *context, LayerParam *param, LayerRes
 
     std::set<std::string> build_options;
     AdjustBuildOptionForFp32(build_options);
+    // build_options.emplace("-DFORCE_FP32");
 
     ret = CreateExecuteUnit(execute_units_[0], "softmax", kernel_name, build_options);
     if (ret != TNN_OK) {

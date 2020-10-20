@@ -16,10 +16,51 @@
 #include "tnn/utils/dims_vector_utils.h"
 #include <sys/time.h>
 #include <float.h>
+#include <set>
+#include "tnn/utils/dims_vector_utils.h"
 
 #if defined(__APPLE__)
 #include "TargetConditionals.h"
 #endif
+
+typedef std::map<std::string, TNN_NS::DimsVector> NameShapeMap;
+typedef std::map<std::string, std::shared_ptr<char>> NameMemoryMap;
+static NameShapeMap cpu_shapeMap;
+static NameMemoryMap cpu_memMap;
+static NameShapeMap dev_shapeMap;
+static NameMemoryMap dev_memMap;
+
+static int cpuCaseId = 0;
+static int gpuCaseId = 0;
+static int savedCaseId = 5;
+
+template <typename T>
+void SaveDataTo(const T* ptr, const std::string& path, TNN_NS::DimsVector shape, size_t count) {
+    std::ofstream out(path.c_str());
+    if(!out.good()){
+        LOGE("open:%s failed!\n", path.c_str());
+        return;
+    }
+    if(shape.size() == 4){
+        int index = 0;
+        for(int n=0; n<shape[0]; ++n){
+            for(int c=0; c<shape[1]; ++c){
+                for(int h=0; h<shape[2]; ++h){
+                    for(int w=0; w<shape[3]; ++w){
+                        out << "[" << n <<"," << c << "," <<h <<"," << w <<"]:"<<ptr[index++] << std::endl;
+                        //std::cout << n <<"," << c << "," <<h <<"," << w <<":"<<ptr[index++] << std::endl;
+                    }
+                }
+            }
+        }
+    } else{
+        for(int i = 0; i<count; ++i){
+            out << ptr[i] << std::endl;
+            //std::cout << ptr[i] << std::endl;
+        }
+    }
+    out.close();
+}
 
 namespace TNN_NS {
 const std::string kTNNSDKDefaultName = "TNN.sdk.default.name";
@@ -517,6 +558,7 @@ TNN_NS::Status TNNSDKSample::Init(std::shared_ptr<TNNSDKOption> option) {
 #if defined(__APPLE__) && TARGET_OS_IPHONE
         device_type_ = TNN_NS::DEVICE_METAL;
 #else
+        LOGE("dlmeng: device type is set to opencl\n");
         device_type_ = TNN_NS::DEVICE_OPENCL;
 #endif
     }
@@ -528,6 +570,7 @@ TNN_NS::Status TNNSDKSample::Init(std::shared_ptr<TNNSDKOption> option) {
         device_type_      = TNN_NS::DEVICE_HUAWEI_NPU;
 #endif
     }
+    LOGE("dlmeng: device type is %d\n, device_type_");
     
     //创建实例instance
     {
@@ -542,6 +585,7 @@ TNN_NS::Status TNNSDKSample::Init(std::shared_ptr<TNNSDKOption> option) {
         if (!check_npu_ && (status != TNN_NS::TNN_OK || !instance)) {
             // try device_arm
             if (option->compute_units >= TNNComputeUnitsGPU) {
+                LOGE("dlmeng: create instance failed\n");
                 device_type_               = TNN_NS::DEVICE_ARM;
                 network_config.device_type = TNN_NS::DEVICE_ARM;
                 instance                   = net_->CreateInst(network_config, status,  option->input_shapes);
@@ -670,7 +714,51 @@ TNN_NS::Status TNNSDKSample::Predict(std::shared_ptr<TNNSDKInput> input, std::sh
         }
         
         // step 2. Forward
+#ifndef FORWARD_CALLBACK_ENABLE
         status = instance_->ForwardAsync(nullptr);
+#else
+        auto dump_blob = [&, this](std::vector<TNN_NS::Blob*>& blobs, TNN_NS::LayerInfo* info) {
+            NameShapeMap* shapeMap = nullptr;
+            NameMemoryMap* memMap = nullptr;
+            if(device_type_ == TNN_NS::DEVICE_ARM){
+                shapeMap = &cpu_shapeMap;
+                memMap = &cpu_memMap;
+            } else{
+                shapeMap = &dev_shapeMap;
+                memMap = &dev_memMap;
+            }
+            LOGE("dlmeng: dump_blob callback is called\n");
+            std::set<std::string> blob_names = {"391", "408", "425", "sigmoid_output1", "sigmoid_output2", "sigmoid_output3"};
+            for(auto blob: blobs) {
+                auto blobDesc = blob->GetBlobDesc();
+                std::string blobName = blobDesc.name;
+                if (blob_names.find(blobName) == blob_names.end()) continue;
+                LOGE("dlmeng: dump_blob callback save blob: %s\n", blobName.c_str());
+                if(shapeMap->find(blobName) != shapeMap->end()){
+                    assert(memMap->find(blobName) != memMap->end());
+                    LOGE("\n%s has been dumped before!\n", blobName.c_str());
+                }
+                //assert(shapeMap.find(blobName) == shapeMap.end());
+                //assert(memMap.find(blobName) == memMap.end());
+                
+                int blobDataBytes = TNN_NS::DimsVectorUtils::Count(blobDesc.dims) * sizeof(float);
+                (*memMap)[blobName] = std::shared_ptr<char>(new char[blobDataBytes], [] (char*p){delete[] p;});
+                
+                void* commandQueue;
+                instance_->GetCommandQueue(&commandQueue);
+                TNN_NS::MatConvertParam param;
+                TNN_NS::BlobConverter blobConverter(blob);
+                
+                TNN_NS::Mat mat(TNN_NS::DEVICE_ARM, TNN_NS::NCHW_FLOAT, blobDesc.dims, (*memMap)[blobName].get());
+                TNN_NS::Status ret = blobConverter.ConvertToMat(mat, param, commandQueue);
+                if(ret != TNN_NS::TNN_OK) {
+                    LOGE("cpu blob (name:%s) converte failed (%s)\n", blobName.c_str(), ret.description().c_str());
+                }
+                (*shapeMap)[blobName] = blobDesc.dims;
+            }
+        };
+        status = instance_->ForwardWithCallback(nullptr, dump_blob);
+#endif
         if (status != TNN_NS::TNN_OK) {
             LOGE("instance.Forward Error: %s\n", status.description().c_str());
             return status;
@@ -694,7 +782,38 @@ TNN_NS::Status TNNSDKSample::Predict(std::shared_ptr<TNNSDKInput> input, std::sh
                   output->AddMat(output_mat, name);
               }
         }
-  
+
+#ifdef FORWARD_CALLBACK_ENABLE
+        LOGE("dlmeng: output dump device_type:%d, cpuCaseId: %d, gpuCaseId: %d\n", device_type_, cpuCaseId, gpuCaseId);
+        if (device_type_ == TNN_NS::DEVICE_ARM && !cpuCaseId) {
+            //dump to file
+            LOGE("dlmeng: output dump cpu blob\n");
+            for(auto pair:cpu_shapeMap) {
+                auto name = pair.first;
+                auto shape = pair.second;
+                float* data= reinterpret_cast<float*>(cpu_memMap[name].get());
+                LOGE("cpu blob %s:(%d,%d,%d,%d)\n", name.c_str(), shape[0], shape[1], shape[2], shape[3]);
+                const std::string cpu_path = "/sdcard/dlmeng/" + name + + "_" + std::to_string(savedCaseId) + "_arm.txt";
+                // SaveDataTo(data, cpu_path, shape, -1);
+                // CompareDifference(data, cpu_path, name, shape);
+            };
+            cpuCaseId++;
+        } else if (device_type_ == TNN_NS::DEVICE_OPENCL && !gpuCaseId) {
+            //dump to file
+            LOGE("dlmeng: output dump gpu blob\n");
+            for(auto pair:dev_shapeMap) {
+                auto name = pair.first;
+                auto shape = pair.second;
+                float* data= reinterpret_cast<float*>(dev_memMap[name].get());
+                LOGE("gpu blob %s:(%d,%d,%d,%d)\n", name.c_str(), shape[0], shape[1], shape[2], shape[3]);
+                const std::string dev_path = "/sdcard/dlmeng/" + name + + "_" + std::to_string(savedCaseId) + "_opencl.txt";
+                // SaveDataTo(data, dev_path, shape, -1);
+                // float* data_cpu = reinterpret_cast<float*>(cpu_memMap[name].get());
+                // CompareDifference(data, data_cpu, name, shape);
+            }
+            gpuCaseId++;
+        }
+#endif
         
 #if TNN_SDK_ENABLE_BENCHMARK
         gettimeofday(&tv_end, NULL);

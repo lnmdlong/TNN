@@ -68,6 +68,7 @@ std::shared_ptr<Instance> TNNImplDefault::CreateInst(NetworkConfig& net_config, 
     status        = instance->Init(interpreter_, inputs_shape);
 
     if (status != TNN_OK) {
+        LOGE("dlmeng: CreateInst status: %s\n", status.description().c_str());
         return nullptr;
     }
     return instance;

@@ -83,6 +83,7 @@ Status Instance::Forward() {
 #ifdef FORWARD_CALLBACK_ENABLE
 Status Instance::ForwardWithCallback(BlobStatisticCallback before, BlobStatisticCallback after) {
     output_mats_convert_status_.clear();
+    LOGE("dlmeng: Instance::ForwardWithCallback is called\n");
     return (Status)network_->ForwardWithCallback(before, after);
 }
 #endif  // end of FORWARD_CALLBACK_ENABLE
