@@ -54,6 +54,12 @@ Status OpenCLConvLayerCommonAcc::Init(Context *context, LayerParam *param, Layer
     std::string kernel_name = "Conv2D";
     if (run_3d_ndrange_)
         kernel_name = "Conv2DGS3D";
+    else if (conv_params_.kernel_x == 3 && conv_params_.kernel_y == 3 &&
+             conv_params_.pad_x == 1 && conv_params_.pad_y == 1 &&
+             conv_params_.stride_x == 1 && conv_params_.stride_y == 1 &&
+             conv_params_.dilation_x == 1 && conv_params_.dilation_y == 1) {
+        kernel_name = "Conv2D3x3s1p1d1";
+    }
     ret = CreateExecuteUnit(execute_units_[0], "convolution", kernel_name, build_options);
     if (ret != TNN_OK) {
         LOGE("create execute unit failed!\n");
