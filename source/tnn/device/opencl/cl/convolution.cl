@@ -416,6 +416,145 @@ __kernel void Conv2D(
                                output_bh_idx, remain);
 }
 
+__kernel void Conv2D3x3s1p1d1(
+    GLOBAL_SIZE_2_DIMS __read_only image2d_t input,
+    __read_only image2d_t weights, __read_only image2d_t bias,
+    __write_only image2d_t output, __private const int2 input_wh,
+    __private const int in_channel_block_length, __private const int2 output_wh,
+    __private const int2 kernel_wh, __private const int2 stride_wh,
+    __private const int2 padding_wh, __private const int2 dilation_wh,
+    __private const int out_width_blocks) {
+    // deal with 2 dim image : dim0 = channel + width | dim1 = batch + height
+    const int output_cw_idx = get_global_id(0);
+    const int output_bh_idx = get_global_id(1);
+    DEAL_NON_UNIFORM_DIM2(output_cw_idx, output_bh_idx);
+
+    const int out_channel_block_idx = output_cw_idx / out_width_blocks;
+    const int out_width_block_idx   = output_cw_idx % out_width_blocks;
+    const int out_batch_idx  = output_bh_idx / output_wh.y;
+    const int out_height_idx = output_bh_idx % output_wh.y;
+
+    FLOAT4 out0 = RI_F(bias, SAMPLER, (int2)(out_channel_block_idx, 0));
+    FLOAT4 out1 = out0;
+    FLOAT4 out2 = out0;
+    FLOAT4 out3 = out0;
+
+    int in_width0 = (out_width_block_idx << 2) - 1;
+    int in_width1 = in_width0 + 1;
+    int in_width2 = in_width0 + 2;
+    int in_width3 = in_width0 + 3;
+    int in_width4 = in_width0 + 4;
+    int in_width5 = in_width0 + 5;
+
+    const int height_start = out_height_idx - 1;
+    int in_height_start = select(height_start, 0, height_start < 0);
+    int in_height_end = min(3 + height_start, input_wh.y);
+
+    const int batch_idx = mul24(out_batch_idx, input_wh.y);
+    const int weights_h_idx = mad24(out_channel_block_idx, 9,
+                                    mul24(in_height_start - height_start, 3));
+
+    FLOAT4 in0, in1, in2, in3, in4, in5;
+    FLOAT4 weights_w0_c0, weights_w0_c1, weights_w0_c2, weights_w0_c3;
+    FLOAT4 weights_w1_c0, weights_w1_c1, weights_w1_c2, weights_w1_c3;
+    FLOAT4 weights_w2_c0, weights_w2_c1, weights_w2_c2, weights_w2_c3;
+    int weights_y_idx = weights_h_idx;
+    for (int iy = in_height_start; iy < in_height_end; iy++) {
+        int in_hb_value = iy + batch_idx;
+        for (int input_c_block_idx = 0; input_c_block_idx < in_channel_block_length; ++input_c_block_idx) {
+            const int in_idx  = mul24(input_c_block_idx, input_wh.x);
+            int weights_x_idx = input_c_block_idx << 2;
+            READ_INPUT_IMAGE(0, 0);
+            READ_INPUT_IMAGE(1, 0);
+            READ_INPUT_IMAGE(2, 0);
+            READ_INPUT_IMAGE(3, 0);
+            READ_INPUT_IMAGE(4, 0);
+            READ_INPUT_IMAGE(5, 0);
+
+            weights_w0_c0 = RI_F(weights, SAMPLER, (int2)(weights_x_idx, weights_y_idx));
+            weights_w0_c1 = RI_F(weights, SAMPLER, (int2)(weights_x_idx + 1, weights_y_idx));
+            weights_w0_c2 = RI_F(weights, SAMPLER, (int2)(weights_x_idx + 2, weights_y_idx));
+            weights_w0_c3 = RI_F(weights, SAMPLER, (int2)(weights_x_idx + 3, weights_y_idx));
+
+            weights_w1_c0 = RI_F(weights, SAMPLER, (int2)(weights_x_idx, weights_y_idx + 1));
+            weights_w1_c1 = RI_F(weights, SAMPLER, (int2)(weights_x_idx + 1, weights_y_idx + 1));
+            weights_w1_c2 = RI_F(weights, SAMPLER, (int2)(weights_x_idx + 2, weights_y_idx + 1));
+            weights_w1_c3 = RI_F(weights, SAMPLER, (int2)(weights_x_idx + 3, weights_y_idx + 1));
+
+            weights_w2_c0 = RI_F(weights, SAMPLER, (int2)(weights_x_idx, weights_y_idx + 2));
+            weights_w2_c1 = RI_F(weights, SAMPLER, (int2)(weights_x_idx + 1, weights_y_idx + 2));
+            weights_w2_c2 = RI_F(weights, SAMPLER, (int2)(weights_x_idx + 2, weights_y_idx + 2));
+            weights_w2_c3 = RI_F(weights, SAMPLER, (int2)(weights_x_idx + 3, weights_y_idx + 2));
+
+            out0 = mad(in0.x, weights_w0_c0, out0);
+            out0 = mad(in0.y, weights_w0_c1, out0);
+            out0 = mad(in0.z, weights_w0_c2, out0);
+            out0 = mad(in0.w, weights_w0_c3, out0);
+            out0 = mad(in1.x, weights_w1_c0, out0);
+            out0 = mad(in1.y, weights_w1_c1, out0);
+            out0 = mad(in1.z, weights_w1_c2, out0);
+            out0 = mad(in1.w, weights_w1_c3, out0);
+            out0 = mad(in2.x, weights_w2_c0, out0);
+            out0 = mad(in2.y, weights_w2_c1, out0);
+            out0 = mad(in2.z, weights_w2_c2, out0);
+            out0 = mad(in2.w, weights_w2_c3, out0);
+
+            out1 = mad(in1.x, weights_w0_c0, out1);
+            out1 = mad(in1.y, weights_w0_c1, out1);
+            out1 = mad(in1.z, weights_w0_c2, out1);
+            out1 = mad(in1.w, weights_w0_c3, out1);
+            out1 = mad(in2.x, weights_w1_c0, out1);
+            out1 = mad(in2.y, weights_w1_c1, out1);
+            out1 = mad(in2.z, weights_w1_c2, out1);
+            out1 = mad(in2.w, weights_w1_c3, out1);
+            out1 = mad(in3.x, weights_w2_c0, out1);
+            out1 = mad(in3.y, weights_w2_c1, out1);
+            out1 = mad(in3.z, weights_w2_c2, out1);
+            out1 = mad(in3.w, weights_w2_c3, out1);
+
+            out2 = mad(in2.x, weights_w0_c0, out2);
+            out2 = mad(in2.y, weights_w0_c1, out2);
+            out2 = mad(in2.z, weights_w0_c2, out2);
+            out2 = mad(in2.w, weights_w0_c3, out2);
+            out2 = mad(in3.x, weights_w1_c0, out2);
+            out2 = mad(in3.y, weights_w1_c1, out2);
+            out2 = mad(in3.z, weights_w1_c2, out2);
+            out2 = mad(in3.w, weights_w1_c3, out2);
+            out2 = mad(in4.x, weights_w2_c0, out2);
+            out2 = mad(in4.y, weights_w2_c1, out2);
+            out2 = mad(in4.z, weights_w2_c2, out2);
+            out2 = mad(in4.w, weights_w2_c3, out2);
+
+            out3 = mad(in3.x, weights_w0_c0, out3);
+            out3 = mad(in3.y, weights_w0_c1, out3);
+            out3 = mad(in3.z, weights_w0_c2, out3);
+            out3 = mad(in3.w, weights_w0_c3, out3);
+            out3 = mad(in4.x, weights_w1_c0, out3);
+            out3 = mad(in4.y, weights_w1_c1, out3);
+            out3 = mad(in4.z, weights_w1_c2, out3);
+            out3 = mad(in4.w, weights_w1_c3, out3);
+            out3 = mad(in5.x, weights_w2_c0, out3);
+            out3 = mad(in5.y, weights_w2_c1, out3);
+            out3 = mad(in5.z, weights_w2_c2, out3);
+            out3 = mad(in5.w, weights_w2_c3, out3);
+        }
+        weights_y_idx += 3;
+    }
+
+    out0 = ActivationProcess(out0);
+    out1 = ActivationProcess(out1);
+    out2 = ActivationProcess(out2);
+    out3 = ActivationProcess(out3);
+
+    const int out_x_base = mul24(out_channel_block_idx, output_wh.x);
+    int out_x_idx        = out_width_block_idx << 2;
+
+    const int remain = output_wh.x - out_x_idx;
+    int output_w_idx = out_x_base + out_x_idx;
+    WriteOutputAntiOutOfBounds(output, out0, out1, out2, out3, output_w_idx,
+                               output_bh_idx, remain);
+}
+
 __kernel void Conv2DGS3D(
     GLOBAL_SIZE_3_DIMS __read_only image2d_t input,
     __read_only image2d_t weights, __read_only image2d_t bias,
