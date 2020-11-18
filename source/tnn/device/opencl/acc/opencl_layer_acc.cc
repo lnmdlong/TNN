@@ -18,7 +18,7 @@
 
 namespace TNN_NS {
 
-//#define LOCAL_SIZE_FINE_TUNE
+// #define LOCAL_SIZE_FINE_TUNE
 
 Status OpenCLLayerAcc::Init(Context *context, LayerParam *param, LayerResource *resource,
                             const std::vector<Blob *> &inputs, const std::vector<Blob *> &outputs) {
@@ -65,10 +65,25 @@ Status OpenCLLayerAcc::Forward(const std::vector<Blob *> &inputs, const std::vec
 #if defined(LOCAL_SIZE_FINE_TUNE) && TNN_PROFILE
     auto execute_unit_org                                 = execute_units_[0];
     auto max_wgs                                          = execute_unit_org.workgroupsize_max;
+    #if 0
     std::vector<std::vector<uint32_t>> local_size_list_3d = {
         {16, 4, 1}, {8, 8, 1},   {4, 16, 1}, {2, 32, 1}, {1, 64, 1}, {2, 64, 1}, {4, 64, 1},
         {8, 64, 1}, {16, 64, 1}, {8, 64, 2}, {4, 64, 4}, {2, 64, 8}, {2, 64, 4}, {},
     };
+    #else
+    std::vector<std::vector<uint32_t>> local_size_list_3d;
+    LOGE("dlmeng: workgroupsize_max: %d\n", max_wgs);
+    for (uint32_t i = 1; i <= 24; i++) {
+        for (uint32_t j = 1; j <= 18; j++) {
+            for (uint32_t k = 1; k < 71; k++) {
+                if (i * j * k <= max_wgs) {
+                    std::vector<uint32_t> lws = {i, j, k};
+                    local_size_list_3d.push_back(lws);
+                }
+            }
+        }
+    }
+    #endif
     std::vector<std::vector<uint32_t>> local_size_list_2d = {
         {2, max_wgs / 2},   {4, max_wgs / 4},   {8, max_wgs / 8},
         {16, max_wgs / 16}, {max_wgs / 2, 2},   {max_wgs / 4, 4},
@@ -230,6 +245,7 @@ Status OpenCLLayerAcc::ConvertChannelWeights(float *handle_data_ptr, shared_ptr<
 
     // create ocl_handle_
     if (use_buffer_) {
+        LOGE("dlmeng: upload weights with buffer\n");
         // use clBuffer
         ocl_handle.reset(new OpenCLMemory(TNN_CL_BUFFER));
         size_t type_size = sizeof(float);
@@ -252,6 +268,7 @@ Status OpenCLLayerAcc::ConvertChannelWeights(float *handle_data_ptr, shared_ptr<
         return convertor.ConvertBufferToBuffer(input.get(), ARGUMENT, {output_channel}, ocl_handle.get(), true);
 
     } else {
+        LOGE("dlmeng: upload weights with image\n");
         // use clImage
         int ocl_handle_w          = UP_DIV(output_channel, 4);
         int ocl_handle_h          = 1;

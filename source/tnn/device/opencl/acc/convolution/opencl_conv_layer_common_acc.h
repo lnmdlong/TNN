@@ -30,6 +30,9 @@ public:
     virtual ~OpenCLConvLayerCommonAcc() override;
 
     virtual Status Reshape(const std::vector<Blob *> &inputs, const std::vector<Blob *> &outputs) override;
+
+private:
+    bool is_channel_blocking_;
 };
 
 }  // namespace TNN_NS

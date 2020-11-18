@@ -28,6 +28,9 @@ OpenCLConvLayerAccImpl::OpenCLConvLayerAccImpl() {
     op_name_   = "Conv";
 }
 
+// #define ENABLE_REARRANGE_WEIGHTS
+// #define ENABLE_MULTI_WEIGHTS
+
 Status OpenCLConvLayerAccImpl::Init(Context *context, LayerParam *param, LayerResource *resource,
                                     const std::vector<Blob *> &inputs, const std::vector<Blob *> &outputs) {
     Status ret = OpenCLLayerAcc::Init(context, param, resource, inputs, outputs);
@@ -179,13 +182,55 @@ Status OpenCLConvLayerAccImpl::ConvertWeights(float *weights_data_ptr) {
                                                true);
     } else {
         // create weights use clImage
+        LOGE("dlmeng: create weights use clImage\n");
         DimsVector filter_imageshape;
+        DimsVector filter_imageshape_2;
         if (CT_CONV_DEPTHWISE == conv_type_) {
             filter_imageshape = {conv_params_.kernel_x * conv_params_.kernel_y,
                                  (int)(UP_DIV(conv_params_.output_channel, 4))};  // {w,h}
         } else {
+            #ifdef ENABLE_CONV_EXP
             filter_imageshape = {conv_params_.input_channel, (int)(UP_DIV(conv_params_.output_channel, 4) *
                                                                    conv_params_.kernel_x * conv_params_.kernel_y)};
+            #if 1
+            // HWI4O4OGroup4
+            filter_imageshape_2 = {UP_DIV(conv_params_.output_channel, 4), (int)(UP_DIV(conv_params_.input_channel, 4) *
+                                                                   conv_params_.kernel_x * conv_params_.kernel_y)};
+            #elif 1
+            // HWO4I4OGroup4
+            filter_imageshape_2 = {UP_DIV(conv_params_.input_channel, 4), (int)(UP_DIV(conv_params_.output_channel, 4) *
+                                                                   conv_params_.kernel_x * conv_params_.kernel_y)};
+            #endif
+            LOGE("dlmeng: conv exp filter_imageshape: (%d, %d), filter_imageshape_2: (%d, %d)\n",
+                    filter_imageshape[0], filter_imageshape[1], filter_imageshape_2[0], filter_imageshape_2[1]);
+            #else
+            #ifndef ENABLE_REARRANGE_WEIGHTS
+            filter_imageshape = {conv_params_.input_channel, (int)(UP_DIV(conv_params_.output_channel, 4) *
+                                                                   conv_params_.kernel_x * conv_params_.kernel_y)};
+            #ifdef ENABLE_MULTI_WEIGHTS
+            #ifndef TNN_HEIGHT_DEBUG
+            filter_imageshape_2 = {UP_DIV(conv_params_.input_channel, 4), (int)(UP_DIV(conv_params_.output_channel, 4) *
+                                                                   conv_params_.kernel_x * conv_params_.kernel_y)};
+            LOGE("dlmeng: filter_imageshape: (%d, %d), filter_imageshape_2: (%d, %d)\n",
+                    filter_imageshape[0], filter_imageshape[1], filter_imageshape_2[0], filter_imageshape_2[1]);
+            #else
+            #if 0
+            // HWI4O4OGroup4
+            filter_imageshape_2 = {UP_DIV(conv_params_.output_channel, 4), (int)(UP_DIV(conv_params_.input_channel, 4) *
+                                                                   conv_params_.kernel_x * conv_params_.kernel_y)};
+            #else
+            filter_imageshape_2 = {UP_DIV(conv_params_.input_channel, 4), (int)(UP_DIV(conv_params_.output_channel, 4) *
+                                                                   conv_params_.kernel_x * conv_params_.kernel_y)};
+            #endif
+            LOGE("dlmeng: height debug filter_imageshape: (%d, %d), filter_imageshape_2: (%d, %d)\n",
+                    filter_imageshape[0], filter_imageshape[1], filter_imageshape_2[0], filter_imageshape_2[1]);
+            #endif
+            #endif
+            #else
+            filter_imageshape = {UP_DIV(conv_params_.output_channel, 4), (int)(conv_params_.input_channel *
+                                                                   conv_params_.kernel_x * conv_params_.kernel_y)};
+            #endif
+            #endif
         }
 
         cl_channel_type data_type = CL_FLOAT;
@@ -203,9 +248,119 @@ Status OpenCLConvLayerAccImpl::ConvertWeights(float *weights_data_ptr) {
         ocl_weights_.reset(new OpenCLMemory(TNN_CL_IMAGE));
         ocl_weights_->SetData(image, true);
 
+        #if (defined ENABLE_MULTI_WEIGHTS) || (defined ENABLE_CONV_EXP)
+        cl::Image2D *image0 =
+            new cl::Image2D(*opencl_runtime->Context(), CL_MEM_READ_WRITE, cl::ImageFormat(CL_RGBA, data_type),
+                            filter_imageshape_2[0], filter_imageshape_2[1], 0, nullptr, &ret);
+        if (ret != CL_SUCCESS) {
+            CHECK_CL_SUCCESS(ret)
+            if (nullptr != image0)
+                delete image0;
+            return Status(TNNERR_OPENCL_MEMALLOC_ERROR, "OpenCL Conv malloc memory falied");
+        }
+        ocl_weights0_.reset(new OpenCLMemory(TNN_CL_IMAGE));
+        ocl_weights0_->SetData(image0, true);
+
+        cl::Image2D *image1 =
+            new cl::Image2D(*opencl_runtime->Context(), CL_MEM_READ_WRITE, cl::ImageFormat(CL_RGBA, data_type),
+                            filter_imageshape_2[0], filter_imageshape_2[1], 0, nullptr, &ret);
+        if (ret != CL_SUCCESS) {
+            CHECK_CL_SUCCESS(ret)
+            if (nullptr != image1)
+                delete image1;
+            return Status(TNNERR_OPENCL_MEMALLOC_ERROR, "OpenCL Conv malloc memory falied");
+        }
+        ocl_weights1_.reset(new OpenCLMemory(TNN_CL_IMAGE));
+        ocl_weights1_->SetData(image1, true);
+
+        cl::Image2D *image2 =
+            new cl::Image2D(*opencl_runtime->Context(), CL_MEM_READ_WRITE, cl::ImageFormat(CL_RGBA, data_type),
+                            filter_imageshape_2[0], filter_imageshape_2[1], 0, nullptr, &ret);
+        if (ret != CL_SUCCESS) {
+            CHECK_CL_SUCCESS(ret)
+            if (nullptr != image2)
+                delete image2;
+            return Status(TNNERR_OPENCL_MEMALLOC_ERROR, "OpenCL Conv malloc memory falied");
+        }
+        ocl_weights2_.reset(new OpenCLMemory(TNN_CL_IMAGE));
+        ocl_weights2_->SetData(image2, true);
+
+        cl::Image2D *image3 =
+            new cl::Image2D(*opencl_runtime->Context(), CL_MEM_READ_WRITE, cl::ImageFormat(CL_RGBA, data_type),
+                            filter_imageshape_2[0], filter_imageshape_2[1], 0, nullptr, &ret);
+        if (ret != CL_SUCCESS) {
+            CHECK_CL_SUCCESS(ret)
+            if (nullptr != image3)
+                delete image3;
+            return Status(TNNERR_OPENCL_MEMALLOC_ERROR, "OpenCL Conv malloc memory falied");
+        }
+        ocl_weights3_.reset(new OpenCLMemory(TNN_CL_IMAGE));
+        ocl_weights3_->SetData(image3, true);
+        #endif
+
+        #if (defined ENABLE_CONV_EXP) || (defined TNN_HEIGHT_DEBUG)
+        // bias use clBuffer
+        ocl_bias_buffer_.reset(new OpenCLMemory(TNN_CL_BUFFER));
+        size_t type_size = sizeof(float);
+        if (opencl_runtime->GetFp16Enable())
+            type_size = 2;
+        cl::Buffer *buffer =
+            new cl::Buffer(*opencl_runtime->Context(), CL_MEM_READ_WRITE,
+                           UP_DIV(conv_params_.output_channel, 4) * type_size, nullptr, &ret);
+        if (ret != CL_SUCCESS) {
+            CHECK_CL_SUCCESS(ret)
+            if (nullptr != buffer)
+                delete buffer;
+            return Status(TNNERR_OPENCL_MEMALLOC_ERROR, "OpenCL malloc memory falied");
+        }
+        ocl_bias_buffer_->SetData(buffer, true);
+
+        // construct src && dst
+        DimsVector src_imageshape;
+        const int src_width = 73, src_height = 73;
+        #if 1
+        // NHC4,W4
+        src_imageshape = {src_width, UP_DIV(conv_params_.input_channel, 4) * src_height};
+        #elif 1
+        // NHC4,W4
+        src_imageshape = {UP_DIV(conv_params_.input_channel, 4) * src_width, src_height};
+        #endif
+        cl::Image2D *src_image =
+            new cl::Image2D(*opencl_runtime->Context(), CL_MEM_READ_WRITE, cl::ImageFormat(CL_RGBA, data_type),
+                            src_imageshape[0], src_imageshape[1], 0, nullptr, &ret);
+        if (ret != CL_SUCCESS) {
+            CHECK_CL_SUCCESS(ret)
+            if (nullptr != src_image)
+                delete src_image;
+            return Status(TNNERR_OPENCL_MEMALLOC_ERROR, "OpenCL Conv malloc memory falied");
+        }
+        conv_exp_src_.reset(new OpenCLMemory(TNN_CL_IMAGE));
+        conv_exp_src_->SetData(src_image, true);
+
+        DimsVector dst_imageshape;
+        const int dst_width = 71, dst_height = 71;
+        // NHC4,W4
+        dst_imageshape = {dst_width, UP_DIV(conv_params_.output_channel, 4) * dst_height};
+        cl::Image2D *dst_image =
+            new cl::Image2D(*opencl_runtime->Context(), CL_MEM_READ_WRITE, cl::ImageFormat(CL_RGBA, data_type),
+                            dst_imageshape[0], dst_imageshape[1], 0, nullptr, &ret);
+        if (ret != CL_SUCCESS) {
+            CHECK_CL_SUCCESS(ret)
+            if (nullptr != dst_image)
+                delete dst_image;
+            return Status(TNNERR_OPENCL_MEMALLOC_ERROR, "OpenCL Conv malloc memory falied");
+        }
+        conv_exp_dst_.reset(new OpenCLMemory(TNN_CL_IMAGE));
+        conv_exp_dst_->SetData(dst_image, true);
+        #endif
+
         // transfer from clBuffer to clImage
         ImageBufferConvertor convertor(opencl_runtime, ocl_context_->CommandQueue());
+        #ifndef ENABLE_REARRANGE_WEIGHTS
         OpenCLBufferFormat buffer_format = CONV2D_FILTER;
+        #else
+        OpenCLBufferFormat buffer_format = CONV2D_FILTER_REARRANGE;
+        #endif
         if (CT_CONV_DEPTHWISE == conv_type_) {
             buffer_format = DW_CONV2D_FILTER;
         }

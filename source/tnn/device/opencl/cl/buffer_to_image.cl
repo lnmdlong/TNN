@@ -73,6 +73,59 @@ __kernel void Conv2DFilterBufferToImage(GLOBAL_SIZE_2_DIMS __global const float 
     write_imagef(output, (int2)(image_width_idx, image_height_idx), output_values);
 }
 
+// convert kernel : from buffer(oihw) to image [w,h]=(oc/4 oc4, h w ic)
+__kernel void Conv2DFilterRearrangeBufferToImage(GLOBAL_SIZE_2_DIMS __global const float *input_ptr,
+                                            __private const int output_channel, __private const int input_channel,
+                                            __private const int2 kernel_wh, __private const int ic_h_w_size,
+                                            __private const int height_width_size,
+                                            __private const int width_ic_size, __write_only image2d_t output) {
+    int image_width_idx  = get_global_id(0); // oc/4
+    int image_height_idx = get_global_id(1); // h w ic
+
+    DEAL_NON_UNIFORM_DIM2(image_width_idx, image_height_idx);
+
+    const int output_channel_4_idx = image_width_idx * 4;
+    const int buffer_height_idx    = image_height_idx / width_ic_size;
+    const int width_ic_idx         = image_height_idx % width_ic_size;
+    const int buffer_width_idx     = width_ic_idx / input_channel;
+    const int input_channel_4_idx  = width_ic_idx % input_channel;
+
+    const int buffer_offset = output_channel_4_idx * ic_h_w_size + input_channel_4_idx * height_width_size +
+                              buffer_height_idx * kernel_wh.y + buffer_width_idx;
+
+    float4 output_values = 0;
+    if (output_channel_4_idx < output_channel) {
+        const int remain_channel = output_channel - output_channel_4_idx;
+        if (remain_channel >= 4) {
+            int offset      = buffer_offset;
+            output_values.x = *(input_ptr + offset);
+            offset          = mad24(1, ic_h_w_size, offset);
+            output_values.y = *(input_ptr + offset);
+            offset += ic_h_w_size;
+            output_values.z = *(input_ptr + offset);
+            offset += ic_h_w_size;
+            output_values.w = *(input_ptr + offset);
+        } else if (remain_channel == 3) {
+            int offset      = buffer_offset;
+            output_values.x = *(input_ptr + offset);
+            offset          = mad24(1, ic_h_w_size, offset);
+            output_values.y = *(input_ptr + offset);
+            offset += ic_h_w_size;
+            output_values.z = *(input_ptr + offset);
+
+        } else if (remain_channel == 2) {
+            int offset      = buffer_offset;
+            output_values.x = *(input_ptr + offset);
+            offset          = mad24(1, ic_h_w_size, offset);
+            output_values.y = *(input_ptr + offset);
+        } else if (remain_channel == 1) {
+            int offset      = buffer_offset;
+            output_values.x = *(input_ptr + offset);
+        }
+    }
+
+    write_imagef(output, (int2)(image_width_idx, image_height_idx), output_values);
+}
 
 // convert kernel from buffer(mihw) to image [w,h]=(h w m ic4, ic/4)
 // but now dw only support m == 1

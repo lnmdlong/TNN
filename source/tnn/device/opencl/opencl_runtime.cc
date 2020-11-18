@@ -103,7 +103,7 @@ Status OpenCLRuntime::Init() {
             return Status(TNNERR_OPENCL_RUNTIME_ERROR, "OpenCL Platform not found!");
         }
 
-        LOGD("find %lu platforms\n", platforms.size());
+        LOGE("find %lu platforms\n", platforms.size());
 
         // search GPU
         std::vector<cl::Device> devices;
@@ -132,9 +132,9 @@ Status OpenCLRuntime::Init() {
         const std::string device_name    = device_->getInfo<CL_DEVICE_NAME>();
         const std::string device_version = device_->getInfo<CL_DEVICE_VERSION>();
         const std::string opencl_version = device_->getInfo<CL_DEVICE_OPENCL_C_VERSION>();
-        LOGD("device name:\t%s\n", device_name.c_str());
-        LOGD("opencl version:\t%s\n", device_version.c_str());
-        LOGD("highest opencl c version:\t%s\n", opencl_version.c_str());
+        LOGE("device name:\t%s\n", device_name.c_str());
+        LOGE("opencl version:\t%s\n", device_version.c_str());
+        LOGE("highest opencl c version:\t%s\n", opencl_version.c_str());
 
         gpu_info_ = ParseGpuInfo(device_name, device_version);
 

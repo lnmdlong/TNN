@@ -99,6 +99,8 @@ Status ImageBufferConvertor::ConvertBufferToImage(const OpenCLMemory *buffer, co
     std::string kernel_name;
     if (type == CONV2D_FILTER) {
         kernel_name = "Conv2DFilterBufferToImage";
+    } else if (type == CONV2D_FILTER_REARRANGE) {
+        kernel_name = "Conv2DFilterRearrangeBufferToImage";
     } else if (type == DW_CONV2D_FILTER) {
         kernel_name = "DWFilterBufferToImage";
     } else if (type == NHWC_BUFFER) {
@@ -139,6 +141,21 @@ Status ImageBufferConvertor::ConvertBufferToImage(const OpenCLMemory *buffer, co
         buffer_to_image_unit_.ocl_kernel.setArg(idx++, sizeof(kernel_shape), kernel_shape);
         buffer_to_image_unit_.ocl_kernel.setArg(idx++, static_cast<uint32_t>(ic_w_h_size));
         buffer_to_image_unit_.ocl_kernel.setArg(idx++, static_cast<uint32_t>(w_h_size));
+    } else if (type == CONV2D_FILTER_REARRANGE) {
+        //channel * height * width
+        const int ic_w_h_size = dims[1] * dims[2] * dims[3];
+        //height * width
+        const int w_h_size    = dims[2] * dims[3];
+        //width * channel
+        const int w_ic_size    = dims[3] * dims[1];
+        int kernel_shape[2]   = {dims[2], dims[3]};
+        LOGE("dlmeng: ic_w_h_size: %d, w_h_size: %d, w_ic_size: %d\n", ic_w_h_size, w_h_size, w_ic_size);
+        buffer_to_image_unit_.ocl_kernel.setArg(idx++, static_cast<uint32_t>(dims[0]));
+        buffer_to_image_unit_.ocl_kernel.setArg(idx++, static_cast<uint32_t>(dims[1]));
+        buffer_to_image_unit_.ocl_kernel.setArg(idx++, sizeof(kernel_shape), kernel_shape);
+        buffer_to_image_unit_.ocl_kernel.setArg(idx++, static_cast<uint32_t>(ic_w_h_size));
+        buffer_to_image_unit_.ocl_kernel.setArg(idx++, static_cast<uint32_t>(w_h_size));
+        buffer_to_image_unit_.ocl_kernel.setArg(idx++, static_cast<uint32_t>(w_ic_size));
     } else if (type == DW_CONV2D_FILTER) {
         //height * width
         const int w_h_size  = dims[2] * dims[3];

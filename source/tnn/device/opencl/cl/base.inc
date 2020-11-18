@@ -30,6 +30,16 @@ __constant sampler_t SAMPLER = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP |
     out##i = mad(in##i.z, weights2, out##i); \
     out##i = mad(in##i.w, weights3, out##i);
 
+#define CALCULATE_OUTPUT_2(i)                                \
+    out0_##i = mad(in0_##i.x, weights0_0, out0_##i);    \
+    out0_##i = mad(in0_##i.y, weights0_1, out0_##i);    \
+    out0_##i = mad(in0_##i.z, weights0_2, out0_##i);    \
+    out0_##i = mad(in0_##i.w, weights0_3, out0_##i);    \
+    out1_##i = mad(in1_##i.x, weights1_0, out1_##i);    \
+    out1_##i = mad(in1_##i.y, weights1_1, out1_##i);    \
+    out1_##i = mad(in1_##i.z, weights1_2, out1_##i);    \
+    out1_##i = mad(in1_##i.w, weights1_3, out1_##i);
+
 #define CALCULATE_OUTPUT_DOT(i)       \
     out##i.x += dot(in##i, weights0); \
     out##i.y += dot(in##i, weights1); \

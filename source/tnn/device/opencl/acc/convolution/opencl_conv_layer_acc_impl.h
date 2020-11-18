@@ -19,6 +19,10 @@
 
 namespace TNN_NS {
 
+// #define ENABLE_CONV_EXP
+// #define ENABLE_MULTI_WEIGHTS
+// #define TNN_HEIGHT_DEBUG
+
 struct OpenCLConvParam {
     int input_channel;
     int output_channel;
@@ -67,7 +71,17 @@ private:
 protected:
     OpenCLConvParam conv_params_ = {0};
     shared_ptr<OpenCLMemory> ocl_weights_;
+    shared_ptr<OpenCLMemory> ocl_weights0_;
+    shared_ptr<OpenCLMemory> ocl_weights1_;
+    shared_ptr<OpenCLMemory> ocl_weights2_;
+    shared_ptr<OpenCLMemory> ocl_weights3_;
     shared_ptr<OpenCLMemory> ocl_bias_;
+
+    #if (defined ENABLE_CONV_EXP) || (defined TNN_HEIGHT_DEBUG)
+    shared_ptr<OpenCLMemory> conv_exp_src_;
+    shared_ptr<OpenCLMemory> conv_exp_dst_;
+    shared_ptr<OpenCLMemory> ocl_bias_buffer_;
+    #endif
     ConvType conv_type_;
 };
 
