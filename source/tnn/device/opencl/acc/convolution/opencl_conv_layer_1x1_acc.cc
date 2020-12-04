@@ -65,15 +65,6 @@ Status OpenCLConvLayer1x1Acc::Init(Context *context, LayerParam *param, LayerRes
     const int output_height     = output_dims[2];
     const int output_width      = output_dims[3];
 
-    // create kernel
-    std::set<std::string> build_options;
-    if (conv_params_.activation_type == ActivationType_ReLU) {
-        build_options.emplace("-DRELU");
-    } else if (conv_params_.activation_type == ActivationType_ReLU6) {
-        build_options.emplace("-DRELU6");
-    } else if (conv_params_.activation_type == ActivationType_SIGMOID_MUL) {
-        build_options.emplace("-DSIGMOID_MUL");
-    }
     std::string kernel_name;
     if (run_3d_ndrange_) {
         kernel_name = "Conv2D1x1GS3D";
@@ -103,7 +94,7 @@ Status OpenCLConvLayer1x1Acc::Init(Context *context, LayerParam *param, LayerRes
         kernel_name += "_CB2";
     }
 
-    ret = CreateExecuteUnit(execute_units_[0], "convolution", kernel_name, build_options);
+    ret = CreateExecuteUnit(execute_units_[0], "convolution", kernel_name, build_options_);
     if (ret != TNN_OK) {
         LOGE("create execute unit failed!\n");
         return ret;
@@ -147,6 +138,7 @@ Status OpenCLConvLayer1x1Acc::Reshape(const std::vector<Blob *> &inputs, const s
 
         execute_units_[0].local_work_size =
             Conv2d1x1LocalWS3D(execute_units_[0].global_work_size, execute_units_[0].workgroupsize_max);
+
     } else {
          if (width_blocking_is_1_) {
             if (run_local_work_) {
@@ -216,6 +208,10 @@ Status OpenCLConvLayer1x1Acc::Reshape(const std::vector<Blob *> &inputs, const s
     if (run_local_work_) {
         execute_units_[0].ocl_kernel.setArg(idx++, UP_DIV(input_channel_blocks, workgroup_size));
         execute_units_[0].ocl_kernel.setArg(idx++, workgroup_size * 4 * type_size, nullptr);
+    }
+
+    if (ocl_context_->GetEnableTuneKernel()) {
+            execute_units_[0].local_work_size = LocalTune(execute_units_[0], ocl_context_->TuneCommandQueue());
     }
 
     return TNN_OK;
