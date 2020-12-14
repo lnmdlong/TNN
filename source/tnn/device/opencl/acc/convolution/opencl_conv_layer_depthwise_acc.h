@@ -30,6 +30,9 @@ public:
     virtual ~OpenCLConvLayerDepthwiseAcc() override;
 
     virtual Status Reshape(const std::vector<Blob *> &inputs, const std::vector<Blob *> &outputs) override;
+
+private:
+    bool width_blocking_is_1_ = false;
 };
 
 }  // namespace TNN_NS

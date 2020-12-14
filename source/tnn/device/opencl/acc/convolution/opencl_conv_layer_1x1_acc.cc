@@ -81,19 +81,32 @@ Status OpenCLConvLayer1x1Acc::Init(Context *context, LayerParam *param, LayerRes
     uint32_t compute_units = OpenCLRuntime::GetInstance()->DeviceComputeUnits();
     int task_size = output_batch * UP_DIV(output_channel, 4) * output_height * output_width;
     int task_size_per_cu = task_size / static_cast<int>(compute_units);
-    if (!run_3d_ndrange_ && stride_is_1_ && use_buffer_ && task_size_per_cu < 256) {
-        width_blocking_is_1_ = true;
-        kernel_name += "_WB1";
-        run_local_work_ = (UP_DIV(input_channel, 4) >= HighOpIntensityThre) &&
-                          (output_height * output_width <= LowOpHWThre);
-        if (run_local_work_) {
-            kernel_name += "_Local";
+    width_blocking_is_1_ = stride_is_1_ && task_size_per_cu < 256;
+    run_local_work_ = (UP_DIV(input_channel, 4) >= HighOpIntensityThre) &&
+                      (output_height * output_width <= LowOpHWThre) && false;
+    if (!run_3d_ndrange_ && use_buffer_) {
+        if (width_blocking_is_1_) {
+            kernel_name += "_WB1";
+            if (run_local_work_) {
+                kernel_name += "_Local";
+            }
         }
-    } else if (output_channel > 4 && run_3d_ndrange_ && !use_buffer_) {
-        is_channel_blocking_ = true;
-        kernel_name += "_CB2";
+    } else if (run_3d_ndrange_ && !use_buffer_) {
+        if (width_blocking_is_1_) {
+            kernel_name += "_WB1";
+            if (run_local_work_) {
+                kernel_name += "_Local";
+            }
+        } else if (output_channel > 4) {
+            is_channel_blocking_ = true;
+            kernel_name += "_CB2";
+        }
+    } else {
+        width_blocking_is_1_ = false;
+        run_local_work_ = false;
     }
 
+    LOGE("dlmeng: conv 1x1 kernel name: %s\n", kernel_name.c_str());
     ret = CreateExecuteUnit(execute_units_[0], "convolution", kernel_name, build_options_);
     if (ret != TNN_OK) {
         LOGE("create execute unit failed!\n");
@@ -126,7 +139,24 @@ Status OpenCLConvLayer1x1Acc::Reshape(const std::vector<Blob *> &inputs, const s
     uint32_t workgroup_size = 0;
 
     if (run_3d_ndrange_) {
-        if (is_channel_blocking_) {
+        if (run_local_work_) {
+                auto &unit              = execute_units_[0];
+                workgroup_size = std::min(static_cast<uint32_t>(unit.local_mem_size / (4 * type_size)),
+                                          unit.workgroupsize_max);
+                workgroup_size = std::min(static_cast<uint32_t>(input_channel_blocks), workgroup_size);
+                int temp_size = 1;
+                while ((temp_size <<= 1) <= workgroup_size);
+                workgroup_size = temp_size >> 1;
+
+                execute_units_[0].global_work_size = {static_cast<uint32_t>(UP_DIV(output_dims[1], 4) * workgroup_size),
+                                                      static_cast<uint32_t>(output_dims[3]),
+                                                      static_cast<uint32_t>(output_dims[0] * output_dims[2])};
+         
+        } else if (width_blocking_is_1_) {
+            execute_units_[0].global_work_size = {static_cast<uint32_t>(UP_DIV(output_dims[1], 4)),
+                                                  static_cast<uint32_t>(output_dims[3]),
+                                                  static_cast<uint32_t>(output_dims[0] * output_dims[2])};
+        } else if (is_channel_blocking_) {
             execute_units_[0].global_work_size = {static_cast<uint32_t>(UP_DIV(output_dims[1], 8)),
                                                   static_cast<uint32_t>(UP_DIV(output_dims[3], 4)),
                                                   static_cast<uint32_t>(output_dims[0] * output_dims[2])};
@@ -136,12 +166,14 @@ Status OpenCLConvLayer1x1Acc::Reshape(const std::vector<Blob *> &inputs, const s
                                                   static_cast<uint32_t>(output_dims[0] * output_dims[2])};
         }
 
-        execute_units_[0].local_work_size =
-            Conv2d1x1LocalWS3D(execute_units_[0].global_work_size, execute_units_[0].workgroupsize_max);
-
+        if (!run_local_work_) {
+            execute_units_[0].local_work_size =
+                Conv2d1x1LocalWS3D(execute_units_[0].global_work_size, execute_units_[0].workgroupsize_max);
+        } else {
+            execute_units_[0].local_work_size = {workgroup_size, 1, 1};
+        }
     } else {
-         if (width_blocking_is_1_) {
-            if (run_local_work_) {
+        if (run_local_work_) {
                 auto &unit              = execute_units_[0];
                 workgroup_size = std::min(static_cast<uint32_t>(unit.local_mem_size / (4 * type_size)),
                                           unit.workgroupsize_max);
@@ -149,13 +181,16 @@ Status OpenCLConvLayer1x1Acc::Reshape(const std::vector<Blob *> &inputs, const s
                 int temp_size = 1;
                 while ((temp_size <<= 1) <= workgroup_size);
                 workgroup_size = temp_size >> 1;
+                workgroup_size = 2;
+                LOGE("dlmeng: workgroup_size: %d, local_mem_size: %lu, workgroup_size_max: %d\n",
+                     workgroup_size, unit.local_mem_size, unit.workgroupsize_max);
 
                 execute_units_[0].global_work_size = {static_cast<uint32_t>(UP_DIV(output_dims[1], 4) * output_dims[3] * workgroup_size),
                                                       static_cast<uint32_t>(output_dims[0] * output_dims[2])};
-            } else {
+         
+        } else if (width_blocking_is_1_) {
                 execute_units_[0].global_work_size = {static_cast<uint32_t>(UP_DIV(output_dims[1], 4) * output_dims[3]),
                                                       static_cast<uint32_t>(output_dims[0] * output_dims[2])};
-            }
         } else if (is_channel_blocking_) {
             execute_units_[0].global_work_size = {
                 static_cast<uint32_t>(UP_DIV(output_dims[1], 8) * UP_DIV(output_dims[3], 4)),

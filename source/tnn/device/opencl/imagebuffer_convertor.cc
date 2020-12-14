@@ -85,6 +85,7 @@ Status ImageBufferConvertor::ConvertImageToBuffer(const OpenCLMemory *image, con
 
     if (need_wait) {
         //sync
+        LOGE("dlmeng: ImageBufferConvertor call finish 111\n");
         opencl_command_queue_->finish();
     }
     LOGD("end convertImageToBuffer !\n");
@@ -166,7 +167,8 @@ Status ImageBufferConvertor::ConvertBufferToImage(const OpenCLMemory *buffer, co
     CHECK_TNN_OK(ret)
 
     if (need_wait) {
-        opencl_command_queue_->finish();
+        // LOGE("dlmeng: ImageBufferConvertor call finish 222\n");
+        // opencl_command_queue_->finish();
     }
     LOGD("end ConvertBufferToImage !\n");
     return TNN_OK;
@@ -249,6 +251,7 @@ Status ImageBufferConvertor::ConvertBufferToBuffer(const OpenCLMemory *input, co
     CHECK_TNN_OK(ret)
 
     if (need_wait) {
+        LOGE("dlmeng: ImageBufferConvertor call finish 333\n");
         opencl_command_queue_->finish();
     }
     LOGD("end ConvertBufferToBuffer !\n");

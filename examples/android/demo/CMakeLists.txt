@@ -12,6 +12,7 @@ cmake_minimum_required(VERSION 3.4.1)
 set(TNN_ROOT ../../..)
 set(BASE_SRC ../../base)
 include_directories(${TNN_ROOT}/include)
+include_directories(${TNN_ROOT}/test)
 include_directories(${TNN_ROOT}/third_party/opencl/include)
 include_directories(../demo/src/main/jni/thirdparty)
 include_directories(../demo/src/main/jni/thirdparty/kannarotate-android-lib/include)
@@ -21,6 +22,8 @@ include_directories(../demo/src/main/jni/cc/)
 include_directories(${CMAKE_SOURCE_DIR}/src/main/jni/thirdparty/hiai_ddk/include)
 
 set(CMAKE_BUILD_TYPE Release)
+set(TNN_TEST_ENABLE ON CACHE BOOL "" FORCE)
+set(TNN_BENCHMARK_MODE ON CACHE BOOL "" FORCE)
 
 set(TNN_OPENCL_ENABLE ON CACHE BOOL "" FORCE)
 set(TNN_ARM_ENABLE ON CACHE BOOL "" FORCE)
@@ -76,7 +79,7 @@ find_library( # Sets the name of the path variable.
 target_link_libraries( # Specifies the target library.
                         tnn_wrapper
                         -ljnigraphics
-                        -Wl,--whole-archive TNN -Wl,--no-whole-archive
+                        -Wl,--whole-archive TNN TNNBenchmarkTest -Wl,--no-whole-archive
                        # Links the target library to the log library
                        # included in the NDK.
                        ${log-lib})

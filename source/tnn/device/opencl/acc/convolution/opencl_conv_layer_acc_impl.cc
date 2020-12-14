@@ -67,10 +67,12 @@ Status OpenCLConvLayerAccImpl::Init(Context *context, LayerParam *param, LayerRe
         build_options_.emplace("-DSIGMOID_MUL");
     }
 
+#if 1
     // depthwise kernel or winograd kernel use 2d ndragne.
     if (CT_CONV_DEPTHWISE == conv_type_ || CT_CONV_WINOGRAD == conv_type_ ) {
         run_3d_ndrange_ = false;
     }
+#endif
 
     return TNN_OK;
 }

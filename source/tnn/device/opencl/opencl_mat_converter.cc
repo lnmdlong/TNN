@@ -270,6 +270,7 @@ Status OpenCLMatConverterAcc::RunConvertUnit(OpenCLExecuteUnit &unit, cl::Comman
     Status ret = RunKernel(unit.ocl_kernel, unit.global_work_size, unit.local_work_size, command_queue, "MatConvert");
     if (need_wait) {
         //sync
+        LOGE("dlmeng: opencl mat converter call finish\n");
         command_queue->finish();
     }
     return ret;

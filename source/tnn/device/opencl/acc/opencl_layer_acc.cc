@@ -122,6 +122,7 @@ Status OpenCLLayerAcc::Forward(const std::vector<Blob *> &inputs, const std::vec
     }
 
     if (NeedFlush()) {
+        LOGE("dlmeng: opencl command queue call flush\n");
         ocl_context_->CommandQueue()->flush();
     }
 
@@ -158,11 +159,15 @@ std::vector<DataFormat> OpenCLLayerAcc::SupportDataFormat(DataType data_type, in
 }
 
 bool OpenCLLayerAcc::NeedFlush() {
+#if 1
     // flush by magic number
     if (0 == ocl_context_->AddAndGetFlushCount() % 10) {
         return true;
     }
     return false;
+#else
+    return true;
+#endif
 }
 
 Status OpenCLLayerAcc::ConvertChannelWeights(RawBuffer &raw_handle, shared_ptr<OpenCLMemory> &ocl_handle,

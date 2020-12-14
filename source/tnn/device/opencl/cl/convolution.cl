@@ -100,10 +100,7 @@ __kernel void Conv2D1x1_S1_MIX_WB1(GLOBAL_SIZE_2_DIMS __read_only image2d_t inpu
 
     out0 = ActivationProcess(out0);
 
-    const int out_x_base = mul24(output_c_block_idx, wh.x);
-
-    int output_w_idx = out_x_base + out_x_idx;
-    WI_F(output, (int2)(output_w_idx, bh_idx), out0);
+    WI_F(output, (int2)(output_cw_idx, bh_idx), out0);
 }
 
 __kernel void Conv2D1x1_S1_MIX_WB1_Local(GLOBAL_SIZE_2_DIMS __read_only image2d_t input,
@@ -113,7 +110,7 @@ __kernel void Conv2D1x1_S1_MIX_WB1_Local(GLOBAL_SIZE_2_DIMS __read_only image2d_
                           __private const int input_c_blocks,
                           __private const int local_block_size,
                           __local FLOAT4* local_output) {
-
+#if 1
     const int local_id = get_local_id(0);
     const int group_size = get_local_size(0);
     const int global_id = get_global_id(0);
@@ -170,6 +167,7 @@ __kernel void Conv2D1x1_S1_MIX_WB1_Local(GLOBAL_SIZE_2_DIMS __read_only image2d_
         int output_w_idx = out_x_base + out_x_idx;
         WI_F(output, (int2)(output_w_idx, bh_idx), local_output[local_id]);
     }
+#endif
 }
 
 __kernel void Conv2D1x1_S1_MIX_CB2(GLOBAL_SIZE_2_DIMS __read_only image2d_t input,
@@ -468,6 +466,127 @@ __kernel void Conv2D1x1GS3D_S1(
     int output_w_idx = out_x_base + out_x_idx;
     WriteOutputAntiOutOfBounds(output, out0, out1, out2, out3, output_w_idx,
                                bh_idx, remain);
+}
+
+__kernel void Conv2D1x1GS3D_S1_WB1(
+    GLOBAL_SIZE_3_DIMS __read_only image2d_t input, /* [w,h] [c%4 * w * c/4, h * b] */
+    __read_only image2d_t weights,                  /* [w,h] [cout%4 * cin, cout/4] */
+    __read_only image2d_t bias,                     /* [w,h] [cout%4 * cout/4, 1]   */
+    __write_only image2d_t output, __private const int2 wh,
+    __private const int input_c_blocks) {
+    const int output_c_block_idx = get_global_id(0);
+    const int output_w_idx = get_global_id(1);
+    const int bh_idx      = get_global_id(2);
+    DEAL_NON_UNIFORM_DIM3(output_c_block_idx, output_w_idx, bh_idx);
+
+    FLOAT4 out0 = RI_F(bias, SAMPLER, (int2)(output_c_block_idx, 0));
+    FLOAT4 out1 = out0;
+    FLOAT4 out2 = out0;
+    FLOAT4 out3 = out0;
+
+    int input_w_idx0 = output_w_idx;
+    int input_w_idx1 = input_w_idx0 + 1;
+    int input_w_idx2 = input_w_idx0 + 2;
+    int input_w_idx3 = input_w_idx0 + 3;
+
+    input_w_idx0 = select(input_w_idx0, INT_MIN, input_w_idx0 >= wh.x);
+    input_w_idx1 = select(input_w_idx1, INT_MIN, input_w_idx1 >= wh.x);
+    input_w_idx2 = select(input_w_idx2, INT_MIN, input_w_idx2 >= wh.x);
+    input_w_idx3 = select(input_w_idx3, INT_MIN, input_w_idx3 >= wh.x);
+
+    FLOAT4 in0;
+    FLOAT4 weights0, weights1, weights2, weights3;
+    int input_w_base   = 0;
+    int weights_w_base = 0;
+    for (int input_c_block_idx = 0; input_c_block_idx < input_c_blocks; ++input_c_block_idx) {
+        in0 = RI_F(input, SAMPLER, (int2)(input_w_base + input_w_idx0, bh_idx));
+
+        weights0 = RI_F(weights, SAMPLER, (int2)(weights_w_base, output_c_block_idx));
+        weights1 = RI_F(weights, SAMPLER, (int2)(weights_w_base + 1, output_c_block_idx));
+        weights2 = RI_F(weights, SAMPLER, (int2)(weights_w_base + 2, output_c_block_idx));
+        weights3 = RI_F(weights, SAMPLER, (int2)(weights_w_base + 3, output_c_block_idx));
+
+        CALCULATE_OUTPUT(0);
+
+        input_w_base   += wh.x;
+        weights_w_base += 4;
+    }
+
+    out0 = ActivationProcess(out0);
+
+    const int out_x_base = mul24(output_c_block_idx, wh.x);
+    int output_cw_idx = out_x_base + output_w_idx;
+
+    WI_F(output, (int2)(output_cw_idx, bh_idx), out0);
+}
+
+__kernel void Conv2D1x1GS3D_S1_WB1_Local(
+        GLOBAL_SIZE_3_DIMS __read_only image2d_t input,
+        __read_only image2d_t weights,                  /* [w,h] [cout%4 * cin, cout/4] */
+        __read_only image2d_t bias,                     /* [w,h] [cout%4 * cout/4, 1]   */
+        __write_only image2d_t output, __private const int2 wh,
+        __private const int input_c_blocks,
+        __private const int local_block_size,
+        __local FLOAT4* local_output) {
+
+    const int local_id = get_local_id(0);
+    const int group_size = get_local_size(0);
+    const int global_id = get_global_id(0);
+    const int output_c_block_idx = global_id / group_size; //c/4
+    const int out_x_idx = get_global_id(1); // w
+    const int bh_idx  = get_global_id(2); //b h
+
+    DEAL_NON_UNIFORM_DIM3(global_id, out_x_idx, bh_idx);
+
+    local_output[local_id] = (FLOAT4)0.f;
+
+    int input_w_idx0 = out_x_idx;
+
+    input_w_idx0 = select(input_w_idx0, INT_MIN, input_w_idx0 >= wh.x);
+
+    int pos = local_id;
+    int input_w_stride = mul24(group_size, wh.x);
+    int input_w_base   = mul24(pos, wh.x);
+    int weights_stride = group_size << 2;
+    int weights_w_base0 = local_id << 2;
+    int4 weights_w_base = {weights_w_base0, weights_w_base0 + 1, weights_w_base0 + 2, weights_w_base0 + 3};
+    for (unsigned short i = 0; i < local_block_size; i++) {
+        if (pos >= input_c_blocks) break;
+        FLOAT4 in0 = RI_F(input, SAMPLER, (int2)(input_w_base + input_w_idx0, bh_idx));
+
+        FLOAT4 weights0 = RI_F(weights, SAMPLER, (int2)(weights_w_base.x, output_c_block_idx));
+        FLOAT4 weights1 = RI_F(weights, SAMPLER, (int2)(weights_w_base.y, output_c_block_idx));
+        FLOAT4 weights2 = RI_F(weights, SAMPLER, (int2)(weights_w_base.z, output_c_block_idx));
+        FLOAT4 weights3 = RI_F(weights, SAMPLER, (int2)(weights_w_base.w, output_c_block_idx));
+
+        local_output[local_id] += weights0 * in0.x;
+        local_output[local_id] += weights1 * in0.y;
+        local_output[local_id] += weights2 * in0.z;
+        local_output[local_id] += weights3 * in0.w;
+
+        input_w_base   += input_w_stride;
+        weights_w_base += weights_stride;
+        pos += group_size;
+    }
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (unsigned short stride = (group_size >> 1); stride > 0; stride >>= 1) {
+        if (local_id < stride) {
+            local_output[local_id] += local_output[local_id + stride];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    if (local_id == 0) {
+        local_output[local_id] += RI_F(bias, SAMPLER, (int2)(output_c_block_idx, 0));
+        local_output[local_id] = ActivationProcess(local_output[local_id]);
+
+        const int out_x_base = mul24(output_c_block_idx, wh.x);
+
+        const int remain = wh.x - out_x_idx;
+        int output_w_idx = out_x_base + out_x_idx;
+        WI_F(output, (int2)(output_w_idx, bh_idx), local_output[local_id]);
+    }
 }
 
 __kernel void Conv2D1x1GS3D(
@@ -1278,13 +1397,14 @@ __kernel void DepthwiseConv2DS1(GLOBAL_SIZE_2_DIMS __read_only image2d_t input,
                                 __private const int2 input_wh,
                                 __private const int2 output_wh,
                                 __private const int2 kernel_wh,
-                                __private const int2 padding_wh) {
+                                __private const int2 padding_wh,
+                                __private const int out_width_blocks) {
     const int outChannelWidthIdx = get_global_id(0);
     const int outHeightBlockIdx  = get_global_id(1);
     DEAL_NON_UNIFORM_DIM2(outChannelWidthIdx, outHeightBlockIdx);
-    int ow4                      = (output_wh.x + 3) / 4;
-    const int outChannelBlockIdx = outChannelWidthIdx / ow4;
-    const int outWidthBlockidx   = outChannelWidthIdx % ow4;
+
+    const int outChannelBlockIdx = outChannelWidthIdx / out_width_blocks;
+    const int outWidthBlockidx   = outChannelWidthIdx % out_width_blocks;
 
     const int inChannelBlockIdx = outChannelBlockIdx;
 
@@ -1353,8 +1473,8 @@ __kernel void DepthwiseConv2DS1_MIX(GLOBAL_SIZE_2_DIMS __read_only image2d_t inp
                                     __private const int2 output_wh,
                                     __private const int2 kernel_wh,
                                     __private const int2 padding_wh,
-                                    __private const int kernel_size,
-                                    __private const int out_width_blocks) {
+                                    __private const int out_width_blocks,
+                                    __private const int kernel_size) {
     const int outChannelWidthIdx = get_global_id(0);
     const int outHeightBlockIdx  = get_global_id(1);
     DEAL_NON_UNIFORM_DIM2(outChannelWidthIdx, outHeightBlockIdx);
@@ -1427,14 +1547,13 @@ __kernel void DepthwiseConv2D(
     __write_only image2d_t output, __private const int2 input_wh,
     __private const int2 output_wh, __private const int2 kernel_wh,
     __private const int2 padding_wh, __private const int2 dilation_wh,
-    __private const int2 stride_wh) {
+    __private const int2 stride_wh, __private const int out_width_blocks) {
     const int outChannelWidthIdx = get_global_id(0);
     const int outHeightIdx       = get_global_id(1);
     DEAL_NON_UNIFORM_DIM2(outChannelWidthIdx, outHeightIdx);
 
-    int ow4                      = (output_wh.x + 3) / 4;
-    const int outChannelBlockIdx = outChannelWidthIdx / ow4;
-    const int outWidthBlockidx   = outChannelWidthIdx % ow4;
+    const int outChannelBlockIdx = outChannelWidthIdx / out_width_blocks;
+    const int outWidthBlockidx   = outChannelWidthIdx % out_width_blocks;
 
     const int inChannelBlockIdx = outChannelBlockIdx;
 
@@ -1487,14 +1606,122 @@ __kernel void DepthwiseConv2D(
                                outHeightIdx, remain);
 }
 
+__kernel void DepthwiseConv2D_WB1(
+    GLOBAL_SIZE_2_DIMS __read_only image2d_t input,
+    __read_only image2d_t filter, __read_only image2d_t bias,
+    __write_only image2d_t output, __private const int2 input_wh,
+    __private const int2 output_wh, __private const int2 kernel_wh,
+    __private const int2 padding_wh, __private const int2 dilation_wh,
+    __private const int2 stride_wh) {
+    const int outChannelWidthIdx = get_global_id(0);
+    const int outHeightIdx       = get_global_id(1);
+    DEAL_NON_UNIFORM_DIM2(outChannelWidthIdx, outHeightIdx);
+
+    const int outChannelBlockIdx = outChannelWidthIdx / output_wh.x;
+    const int outWidthIdx   = outChannelWidthIdx % output_wh.x;
+
+    const int inChannelBlockIdx = outChannelBlockIdx;
+
+    FLOAT4 out0 = RI_F(bias, SAMPLER, (int2)(outChannelBlockIdx, 0));
+
+    const int in_width0 = mad24(outWidthIdx, stride_wh.x, -padding_wh.x);
+    int heightIdx = mad24(outHeightIdx % output_wh.y, stride_wh.y, -padding_wh.y);
+
+    const int outBatchIdx = mul24((outHeightIdx / output_wh.y), input_wh.y);
+
+    const int in_idx = mul24(inChannelBlockIdx, input_wh.x);
+    for (int kh = 0; kh < kernel_wh.y; kh++) {
+        int in_hb_value = select(heightIdx + outBatchIdx, -1, (heightIdx < 0 || heightIdx >= input_wh.y));
+        heightIdx += dilation_wh.y;
+        for (int kw = 0; kw < kernel_wh.x; kw++) {
+            int filterIdx = mad24(kh, kernel_wh.x, kw);
+            FLOAT4 in0;
+            int inWidthIdx = mul24(kw, dilation_wh.x);
+
+            READ_INPUT_IMAGE(0, inWidthIdx);
+
+            FLOAT4 weights = RI_F(filter, SAMPLER, (int2)(filterIdx, inChannelBlockIdx));
+
+            out0 = mad(in0, weights, out0);
+        }
+    }
+
+    out0 = ActivationProcess(out0);
+
+    WI_F(output, (int2)(outChannelWidthIdx, outHeightIdx), out0);
+}
+
+__kernel void DepthwiseConv2DGS3D(
+    GLOBAL_SIZE_3_DIMS __read_only image2d_t input,
+    __read_only image2d_t filter, __read_only image2d_t bias,
+    __write_only image2d_t output, __private const int2 input_wh,
+    __private const int2 output_wh, __private const int2 kernel_wh,
+    __private const int2 padding_wh, __private const int2 dilation_wh,
+    __private const int2 stride_wh, __private const int out_width_blocks) {
+    const int outChannelBlockIdx = get_global_id(0);
+    const int outWidthBlockIdx   = get_global_id(1);
+    const int outHeightIdx       = get_global_id(2);
+    DEAL_NON_UNIFORM_DIM3(outChannelBlockIdx, outWidthBlockIdx, outHeightIdx);
+
+    const int inChannelBlockIdx = outChannelBlockIdx;
+
+    FLOAT4 out0 = RI_F(bias, SAMPLER, (int2)(outChannelBlockIdx, 0));
+    FLOAT4 out1 = out0;
+    FLOAT4 out2 = out0;
+    FLOAT4 out3 = out0;
+
+    const int in_width0 = mad24(outWidthBlockIdx, stride_wh.x << 2, -padding_wh.x);
+    const int in_width1 = in_width0 + stride_wh.x;
+    const int in_width2 = in_width1 + stride_wh.x;
+    const int in_width3 = in_width2 + stride_wh.x;
+    int heightIdx = mad24(outHeightIdx % output_wh.y, stride_wh.y, -padding_wh.y);
+
+    const int outBatchIdx = mul24((outHeightIdx / output_wh.y), input_wh.y);
+
+    const int in_idx = mul24(inChannelBlockIdx, input_wh.x);
+    for (int kh = 0; kh < kernel_wh.y; kh++) {
+        int in_hb_value = select(heightIdx + outBatchIdx, -1, (heightIdx < 0 || heightIdx >= input_wh.y));
+        heightIdx += dilation_wh.y;
+        for (int kw = 0; kw < kernel_wh.x; kw++) {
+            int filterIdx = mad24(kh, kernel_wh.x, kw);
+            FLOAT4 in0, in1, in2, in3;
+            int inWidthIdx = mul24(kw, dilation_wh.x);
+
+            READ_INPUT_IMAGE(0, inWidthIdx);
+            READ_INPUT_IMAGE(1, inWidthIdx);
+            READ_INPUT_IMAGE(2, inWidthIdx);
+            READ_INPUT_IMAGE(3, inWidthIdx);
+
+            FLOAT4 weights = RI_F(filter, SAMPLER, (int2)(filterIdx, inChannelBlockIdx));
+
+            out0 = mad(in0, weights, out0);
+            out1 = mad(in1, weights, out1);
+            out2 = mad(in2, weights, out2);
+            out3 = mad(in3, weights, out3);
+        }
+    }
+
+    out0 = ActivationProcess(out0);
+    out1 = ActivationProcess(out1);
+    out2 = ActivationProcess(out2);
+    out3 = ActivationProcess(out3);
+
+    const int outWidthBlockIdx4 = outWidthBlockIdx << 2;
+    const int remain            = output_wh.x - outWidthBlockIdx4;
+    int outWidthIdx = mul24(outChannelBlockIdx, output_wh.x) + outWidthBlockIdx4;
+
+    WriteOutputAntiOutOfBounds(output, out0, out1, out2, out3, outWidthIdx,
+                               outHeightIdx, remain);
+}
+
 __kernel void DepthwiseConv2D_MIX(
     GLOBAL_SIZE_2_DIMS __read_only image2d_t input,
     __global const FLOAT4* weights_ptr, __global const FLOAT4* bias_ptr,
     __write_only image2d_t output, __private const int2 input_wh,
     __private const int2 output_wh, __private const int2 kernel_wh,
     __private const int2 padding_wh, __private const int2 dilation_wh,
-    __private const int2 stride_wh, __private const int kernel_size,
-    __private const int out_width_blocks) {
+    __private const int2 stride_wh, __private const int out_width_blocks,
+    __private const int kernel_size) {
     const int outChannelWidthIdx = get_global_id(0);
     const int outHeightIdx       = get_global_id(1);
     DEAL_NON_UNIFORM_DIM2(outChannelWidthIdx, outHeightIdx);

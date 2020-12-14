@@ -46,15 +46,28 @@ Status OpenCLConvLayerDepthwiseAcc::Init(Context *context, LayerParam *param, La
     CHECK_TNN_OK(ret)
 
     std::string kernel_name = "DepthwiseConv2D";
-    if (conv_params_.stride_x == 1 && conv_params_.stride_y == 1 && conv_params_.dilation_x == 1 &&
+    if (run_3d_ndrange_) {
+        kernel_name = "DepthwiseConv2DGS3D";
+    } else if (conv_params_.stride_x == 1 && conv_params_.stride_y == 1 && conv_params_.dilation_x == 1 &&
         conv_params_.dilation_y == 1) {
         kernel_name = "DepthwiseConv2DS1";
+    } else {
+        #if 0
+        width_blocking_is_1_ = true;
+        #endif
     }
 
-    if (use_buffer_) {
+    if (!run_3d_ndrange_ && use_buffer_) {
         kernel_name += "_MIX";
     }
 
+#if 0
+    if (width_blocking_is_1_) {
+        kernel_name += "_WB1";
+    }
+#endif
+
+    LOGE("dlmeng: conv depthwise kernel_name: %s\n", kernel_name.c_str());
     ret = CreateExecuteUnit(execute_units_[0], "convolution", kernel_name, build_options_);
     if (ret != TNN_OK) {
         LOGE("create execute unit failed!\n");
@@ -78,9 +91,6 @@ Status OpenCLConvLayerDepthwiseAcc::Reshape(const std::vector<Blob *> &inputs, c
     const int input_width    = input_dims[3];
     const int input_channels = input_dims[1];
 
-    execute_units_[0].global_work_size = {static_cast<uint32_t>(UP_DIV(output_dims[1], 4) * UP_DIV(output_dims[3], 4)),
-                                        static_cast<uint32_t>(output_dims[0] * output_dims[2])};
-
     int kernel_shape[2]      = {conv_params_.kernel_x, conv_params_.kernel_y};
     int stride_shape[2]      = {conv_params_.stride_x, conv_params_.stride_y};
     int padding_shape[2]     = {conv_params_.pad_x, conv_params_.pad_y};
@@ -88,10 +98,26 @@ Status OpenCLConvLayerDepthwiseAcc::Reshape(const std::vector<Blob *> &inputs, c
 
     int input_imageshape[2]  = {input_width, input_height};
     int output_imageshape[2] = {output_width, output_height};
+    if (run_3d_ndrange_) {
+        execute_units_[0].global_work_size = {static_cast<uint32_t>(UP_DIV(output_dims[1], 4)),
+                                              static_cast<uint32_t>(UP_DIV(output_dims[3], width_blocking_is_1_ ? 1 : 4)),
+                                              static_cast<uint32_t>(output_dims[0] * output_dims[2])};
+
+        execute_units_[0].local_work_size  = Conv2dCommonLocalWS3DGeneral(
+            execute_units_[0].global_work_size, kernel_shape[0] * kernel_shape[1],
+            execute_units_[0].workgroupsize_max);
+    } else {
+        execute_units_[0].global_work_size = {static_cast<uint32_t>(UP_DIV(output_dims[1], 4) *
+                                              UP_DIV(output_dims[3], width_blocking_is_1_ ? 1 : 4)),
+                                              static_cast<uint32_t>(output_dims[0] * output_dims[2])};
+        execute_units_[0].local_work_size  = Conv2dCommonLocalWS2D(
+            execute_units_[0].global_work_size, execute_units_[0].workgroupsize_max, execute_units_[0].sub_group_size);
+    }
 
     uint32_t idx = 0;
-    execute_units_[0].ocl_kernel.setArg(idx++, execute_units_[0].global_work_size[0]);
-    execute_units_[0].ocl_kernel.setArg(idx++, execute_units_[0].global_work_size[1]);
+    for (auto gws : execute_units_[0].global_work_size) {
+        execute_units_[0].ocl_kernel.setArg(idx++, gws);
+    }
     execute_units_[0].ocl_kernel.setArg(idx++, *((cl::Image *)inputs[0]->GetHandle().base));
     if (use_buffer_) {
         execute_units_[0].ocl_kernel.setArg(idx++, *((cl::Buffer *)ocl_weights_->GetData()));
@@ -112,9 +138,12 @@ Status OpenCLConvLayerDepthwiseAcc::Reshape(const std::vector<Blob *> &inputs, c
         execute_units_[0].ocl_kernel.setArg(idx++, sizeof(stride_shape), stride_shape);
     }
 
+    if (!width_blocking_is_1_) {
+        execute_units_[0].ocl_kernel.setArg(idx++, UP_DIV(output_width, 4));
+    }
+
     if (use_buffer_) {
         execute_units_[0].ocl_kernel.setArg(idx++, kernel_shape[0] * kernel_shape[1]);
-        execute_units_[0].ocl_kernel.setArg(idx++, UP_DIV(output_width, 4));
     }
 
     execute_units_[0].local_work_size = Conv2dCommonLocalWS2D(

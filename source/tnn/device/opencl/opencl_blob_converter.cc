@@ -193,9 +193,14 @@ Status OpenCLBlobConverterAcc::ConvertFromMatAsync(Mat &mat, MatConvertParam par
 
 Status OpenCLBlobConverterAcc::ConvertToMat(Mat &mat, MatConvertParam param, void *command_queue) {
     Status ret = ConvertToMatAsync(mat, param, command_queue);
-    //sync
+    // only opencl need to sync for tmp
+    #if 0
+    if (mat.GetDeviceType() == DEVICE_OPENCL && ret == TNN_OK) {
+    #else
     if (ret == TNN_OK) {
+    #endif
         cl::CommandQueue *opencl_command_queue = static_cast<cl::CommandQueue *>(command_queue);
+        LOGE("dlmeng: call command queue finish\n");
         opencl_command_queue->finish();
     }
     return ret;
@@ -206,6 +211,7 @@ Status OpenCLBlobConverterAcc::ConvertFromMat(Mat &mat, MatConvertParam param, v
     //sync
     if (ret == TNN_OK) {
         cl::CommandQueue *opencl_command_queue = static_cast<cl::CommandQueue *>(command_queue);
+        LOGE("dlmeng: ConvertFromMat call command queue finish\n");
         opencl_command_queue->finish();
     }
     return ret;
@@ -383,6 +389,7 @@ Status OpenCLBlobConverterAcc::RunConvertUnit(OpenCLExecuteUnit &unit, cl::Comma
     Status ret = RunKernel(unit.ocl_kernel, unit.global_work_size, unit.local_work_size, command_queue, "BlobConvert");
     if (need_wait) {
         //sync
+        LOGE("dlmeng: Run Convert Unit finish\n");
         command_queue->finish();
     }
     return ret;

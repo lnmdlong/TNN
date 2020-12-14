@@ -7,6 +7,15 @@ include_directories(${TNN_ROOT})
 
 add_executable(TNNTest ${TEST_SRCS})
 
+find_library( # Sets the name of the path variable.
+              log-lib
+
+              # Specifies the name of the NDK library that
+              # you want CMake to locate.
+              log)
+
+add_library(TNNBenchmarkTest STATIC benchmark_model_test.cc benchmark_model_test.h test_utils.cc test_utils.h timer.cc timer.h)
+
 if(TNN_BUILD_SHARED)
     target_link_libraries(TNNTest
         TNN

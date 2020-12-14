@@ -66,6 +66,8 @@ public:
 
     bool GetEnableTuneKernel();
 
+    virtual Status FlushCommandQueue() { return TNN_OK; }
+
 #if TNN_PROFILE
 public:
     virtual void StartProfile();

@@ -530,6 +530,7 @@ Status DefaultNetwork::ForwardAsync(Callback call_back) {
             return result;
         }
     }
+    context_->FlushCommandQueue();
     context_->OnInstanceForwardEnd();
     return result;
 }

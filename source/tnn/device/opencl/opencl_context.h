@@ -83,6 +83,8 @@ public:
     // @brief wait for jobs in the current context to complete
     virtual Status Synchronize() override;
 
+    virtual Status FlushCommandQueue() override;
+
     // @brief add flush_count_ and return val
     unsigned int AddAndGetFlushCount();
 

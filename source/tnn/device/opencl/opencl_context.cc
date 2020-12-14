@@ -182,7 +182,18 @@ Status OpenCLContext::OnInstanceReshapeEnd() {
 
 // synchronize will wait until the comman queue finish
 Status OpenCLContext::Synchronize() {
+    LOGE("dlmeng: opencl context call synchronize\n");
     cl_int result = command_queue_->finish();
+    if (result == 0) {
+        return TNN_OK;
+    } else {
+        return Status(TNNERR_OPENCL_FINISH_ERROR, "command queue finish falied");
+    }
+}
+
+Status OpenCLContext::FlushCommandQueue() {
+    LOGE("dlmeng: opencl context call FlushCommandQueue\n");
+    cl_int result = command_queue_->flush();
     if (result == 0) {
         return TNN_OK;
     } else {
