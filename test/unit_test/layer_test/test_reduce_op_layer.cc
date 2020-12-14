@@ -32,9 +32,11 @@ static std::string GenerateReduceProto(std::string op_type, ReduceLayerParam par
 class ReduceOpLayerTest
     : public LayerTest,
       public ::testing::WithParamInterface<std::tuple<int, int, int, int, std::vector<int>, DataType>> {};
-
+#define SPECIAL_DEBUG
 INSTANTIATE_TEST_SUITE_P(LayerTest, ReduceOpLayerTest,
-                         ::testing::Combine(testing::Values(1), 
+                         ::testing::Combine(
+#ifndef SPECIAL_DEBUG
+                                            testing::Values(1), 
                                             testing::Values(2, 3, 9, 128),
                                             testing::Values(9, 10, 19, 128),
                                             testing::Values(9, 10, 19, 128),
@@ -43,6 +45,14 @@ INSTANTIATE_TEST_SUITE_P(LayerTest, ReduceOpLayerTest,
                                                             std::vector<int>({3}), std::vector<int>({1, 2}),
                                                             std::vector<int>({1, -1}), std::vector<int>({3, -2}),
                                                             std::vector<int>({1, -2, -1})),
+#else
+                                            testing::Values(3), 
+                                            testing::Values(1),
+                                            testing::Values(3),
+                                            testing::Values(1),
+                                            // axis
+                                            testing::Values(std::vector<int>({1, 2})),
+#endif
                                             // dtype
                                             testing::Values(DATA_TYPE_FLOAT)));
 

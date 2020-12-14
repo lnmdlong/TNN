@@ -19,12 +19,18 @@
 
 namespace TNN_NS {
 
+#define SPECIAL_DEBUG
 class ConvLayerTest : public LayerTest,
                       public ::testing::WithParamInterface<
+#ifndef SPECIAL_DEBUG
                           std::tuple<int, int, int, int, int, int, int, int, DataType, ActivationType>> {};
+#else
+                          std::tuple<int, int, int, int, int, int, int, int, int, int, DataType, ActivationType>> {};
+#endif
 
 INSTANTIATE_TEST_SUITE_P(LayerTest, ConvLayerTest,
                          ::testing::Combine(  // batch
+#ifndef SPECIAL_DEBUG
                              testing::Values(1),
                              // channel
                              testing::Values(1, 2, 3, 4, 10, 32),
@@ -44,10 +50,37 @@ INSTANTIATE_TEST_SUITE_P(LayerTest, ConvLayerTest,
                              testing::Values(DATA_TYPE_FLOAT),
                              // activation_type
                              testing::Values(ActivationType_None, ActivationType_ReLU, ActivationType_ReLU6,
-                                             ActivationType_SIGMOID_MUL)));
+                                             ActivationType_SIGMOID_MUL)
+#else
+                            testing::Values(1),
+                             // input channel
+                             testing::Values(1280),
+                             // output channel
+                             testing::Values(1001),
+                             // hw
+                             testing::Values(1),
+                             // group
+                             testing::Values(1),
+                             // kernel
+                             testing::Values(1),
+                             // dilation
+                             testing::Values(1),
+                             // stride
+                             testing::Values(1),
+                             // pads
+                             testing::Values(0),
+                             // pad_type
+                             testing::Values(0),
+                             // data_type
+                             testing::Values(DATA_TYPE_FLOAT),
+                             // activation_type
+                             testing::Values(ActivationType_None)
+#endif
+                            ));
 
 TEST_P(ConvLayerTest, ConvLayer) {
     // get param
+#ifndef SPECIAL_DEBUG
     int batch             = std::get<0>(GetParam());
     int channel_per_group = std::get<1>(GetParam());
     int input_size        = std::get<2>(GetParam());
@@ -59,6 +92,20 @@ TEST_P(ConvLayerTest, ConvLayer) {
     int pad               = std::get<7>(GetParam());
     auto dtype            = std::get<8>(GetParam());
     int activation_type   = std::get<9>(GetParam());
+#else
+    int batch             = std::get<0>(GetParam());
+    int input_channel     = std::get<1>(GetParam());
+    int output_channel    = std::get<2>(GetParam());
+    int input_size        = std::get<3>(GetParam());
+    int group             = std::get<4>(GetParam());
+    int kernel            = std::get<5>(GetParam());
+    int dilation          = std::get<6>(GetParam());
+    int stride            = std::get<7>(GetParam());
+    int pad               = std::get<8>(GetParam());
+    int pad_type          = std::get<9>(GetParam());
+    auto dtype            = std::get<10>(GetParam());
+    int activation_type   = std::get<11>(GetParam());
+#endif
     DeviceType dev        = ConvertDeviceType(FLAGS_dt);
 
     auto precision = PRECISION_AUTO;
@@ -70,9 +117,11 @@ TEST_P(ConvLayerTest, ConvLayer) {
         }
     }
 
+#ifndef SPECIAL_DEBUG
     if (((channel_per_group % 4) != 0) && DEVICE_METAL == dev) {
         GTEST_SKIP();
     }
+#endif
 
     if (activation_type != ActivationType_None && DEVICE_HUAWEI_NPU == dev) {
         GTEST_SKIP();
@@ -81,8 +130,13 @@ TEST_P(ConvLayerTest, ConvLayer) {
     // param
     std::shared_ptr<ConvLayerParam> param(new ConvLayerParam());
     param->name            = "Conv";
+#ifndef SPECIAL_DEBUG
     param->input_channel   = channel;
     param->output_channel  = channel;
+#else
+    param->input_channel   = input_channel;
+    param->output_channel  = output_channel;
+#endif
     param->group           = group;
     param->kernels         = {kernel, kernel};
     param->dialations      = {dilation, dilation};
@@ -90,9 +144,16 @@ TEST_P(ConvLayerTest, ConvLayer) {
     param->pads            = {pad, pad, pad, pad};
     param->bias            = 1;
     param->activation_type = activation_type;
+#ifdef SPECIAL_DEBUG
+    param->pad_type        = pad_type;
+#endif
 
     // generate interpreter
+#ifndef SPECIAL_DEBUG
     std::vector<int> input_dims = {batch, channel, input_size, input_size};
+#else
+    std::vector<int> input_dims = {batch, input_channel, input_size, input_size};
+#endif
     auto interpreter            = GenerateInterpreter("Convolution", {input_dims}, param);
     Run(interpreter, precision);
 }
